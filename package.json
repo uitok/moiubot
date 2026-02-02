@@ -1,0 +1,35 @@
+{
+  "name": "moiubot",
+  "version": "1.0.0",
+  "description": "qBittorrent 分布式管理 Telegram Bot",
+  "main": "bot/index.js",
+  "scripts": {
+    "start": "node bot/index.js",
+    "start:agent": "node agent/index.js",
+    "init-db": "node bot/config/database.js",
+    "dev": "nodemon bot/index.js",
+    "dev:agent": "nodemon agent/index.js",
+    "test": "bash test.sh"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "qbittorrent",
+    "rclone"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "axios": "^1.6.5",
+    "better-sqlite3": "^9.4.3",
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0",
+    "cors": "^2.8.5",
+    "form-data": "^4.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
