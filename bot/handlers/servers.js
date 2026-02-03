@@ -43,17 +43,17 @@ async function handleServers(ctx) {
 
     const serverStatuses = await Promise.all(statusPromises);
 
-    // 构建消息
-    let message = '📊 **服务器状态**\n\n';
+    // 构建消息（纯文本，不使用 Markdown）
+    let message = '📊 服务器状态\n\n';
 
     serverStatuses.forEach((server, index) => {
-      message += `**${index + 1}. ${server.name}**\n`;
+      message += `${index + 1}. ${server.name}\n`;
       message += `   ${server.status} | qBittorrent: ${server.qbConnected}\n`;
       message += `   任务数: ${server.torrents}\n`;
       message += `   URL: ${server.url}\n\n`;
     });
 
-    await ctx.replyWithMarkdown(message);
+    await ctx.reply(message);
   } catch (error) {
     console.error('处理 /servers 命令错误:', error);
     await ctx.reply('❌ 获取服务器状态失败。');

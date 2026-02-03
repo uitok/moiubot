@@ -11,6 +11,11 @@ const {
   getAbout
 } = require('../services/rclone-client');
 
+const {
+  getSyncStatus,
+  forceSync
+} = require('../services/rclone-sync');
+
 // GET /api/rclone/remotes - 获取所有 remotes
 router.get('/remotes', async (req, res) => {
   try {
@@ -127,6 +132,59 @@ router.get('/about', async (req, res) => {
       error: error.message
     });
   }
+});
+
+// ========== 配置同步相关端点 ==========
+
+// GET /api/rclone/sync/status - 获取同步状态
+router.get('/sync/status', async (req, res) => {
+  try {
+    const status = await getSyncStatus();
+
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// POST /api/rclone/sync/force - 强制同步
+router.post('/sync/force', async (req, res) => {
+  try {
+    const result = await forceSync();
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result,
+      message: result.message
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// GET /api/rclone/sync/history - 同步历史（暂未实现）
+router.get('/sync/history', async (req, res) => {
+  res.json({
+    success: true,
+    data: [],
+    message: '同步历史功能将在 Phase 3 实现'
+  });
 });
 
 module.exports = router;

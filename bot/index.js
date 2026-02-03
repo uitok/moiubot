@@ -3,10 +3,20 @@
  */
 require('dotenv').config({ path: '.env.bot' });
 const { Telegraf } = require('telegraf');
-const { DatabaseManager } = require('./config/database');
+const { DatabaseManager, initDatabase } = require('./config/database');
+
+// 初始化数据库表
+console.log('📦 正在初始化数据库...');
+try {
+  initDatabase();
+  console.log('✅ 数据库初始化成功');
+} catch (error) {
+  console.error('❌ 数据库初始化失败:', error);
+  process.exit(1);
+}
 
 // 导入处理器
-const { handleStart } = require('./handlers/start');
+const { handleStart } = require('./handlers/start-simple');
 const { handleServers } = require('./handlers/servers');
 const { handleStatus } = require('./handlers/status');
 const {
@@ -16,7 +26,7 @@ const {
   handleAddTorrent
 } = require('./handlers/add');
 
-// 初始化数据库
+// 初始化数据库管理器
 const db = new DatabaseManager();
 
 // 创建 Bot 实例
@@ -52,27 +62,26 @@ bot.start((ctx) => handleStart(ctx));
 // /help - 帮助信息
 bot.help((ctx) => {
   ctx.reply(
-    `📖 **命令列表**\n\n` +
+    `📖 命令列表\n\n` +
     `【基础命令】\n` +
     `/start - 开始使用\n` +
     `/servers - 查看所有服务器状态\n` +
-    `/status <服务器名> - 查看服务器详细状态\n` +
+    `/status [服务器名] - 查看服务器详细状态\n` +
     `/help - 显示帮助信息\n\n` +
     `【下载管理】\n` +
     `/add - 添加种子（交互式）\n` +
     `/list - 查看下载任务\n` +
-    `/pause <hash> - 暂停任务\n` +
-    `/resume <hash> - 恢复任务\n` +
-    `/delete <hash> - 删除任务\n\n` +
+    `/pause [hash] - 暂停任务\n` +
+    `/resume [hash] - 恢复任务\n` +
+    `/delete [hash] - 删除任务\n\n` +
     `【服务器管理】\n` +
     `/add_server - 添加服务器\n` +
-    `/remove_server <名称> - 删除服务器\n` +
-    `/test_server <名称> - 测试连接\n\n` +
+    `/remove_server [名称] - 删除服务器\n` +
+    `/test_server [名称] - 测试连接\n\n` +
     `【其他】\n` +
     `/categories - 管理分类\n` +
     `/logs - 查看操作日志\n` +
-    `/cancel - 取消当前操作`,
-    { parse_mode: 'Markdown' }
+    `/cancel - 取消当前操作`
   );
 });
 

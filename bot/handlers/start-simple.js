@@ -1,8 +1,7 @@
 /**
- * /start 命令处理器
+ * /start 命令处理器 - 简化测试版本
  */
 const { DatabaseManager } = require('../config/database');
-const { MESSAGES } = require('../config/constants');
 
 // 创建数据库实例
 const db = new DatabaseManager();
@@ -28,16 +27,16 @@ async function handleStart(ctx) {
       db.createUser(telegramId, username, firstName);
       db.logActivity(null, 'user_created', null, { telegramId, username });
 
-      // 使用纯文本，不使用 Markdown
-      await ctx.reply(`${MESSAGES.WELCOME}\n\n🎉 新用户注册成功！\n\n使用 /help 查看所有命令。`);
+      // 简单的欢迎消息，不使用任何常量
+      await ctx.reply('👋 欢迎使用 MoiuBot！\n\n新用户注册成功！\n\n使用 /help 查看所有命令。');
       console.log(`✅ 欢迎消息已发送给新用户`);
     } else {
       // 更新最后活跃时间
       console.log(`🔄 更新用户最后活跃时间: ${telegramId}`);
       db.updateUserLastSeen(telegramId);
 
-      // 使用纯文本，不使用 Markdown
-      await ctx.reply(MESSAGES.WELCOME);
+      // 简单的欢迎消息
+      await ctx.reply('👋 欢迎回来！\n\n使用 /help 查看所有命令。');
       console.log(`✅ 欢迎消息已发送给现有用户`);
     }
   } catch (error) {

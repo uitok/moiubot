@@ -97,6 +97,21 @@ function initDatabase() {
     )
   `);
 
+  // rclone 同步历史表
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS rclone_sync_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      server_id INTEGER,
+      action TEXT NOT NULL,
+      from_version TEXT,
+      to_version TEXT,
+      success BOOLEAN,
+      error_message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (server_id) REFERENCES servers(id)
+    )
+  `);
+
   // 创建索引
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tasks_hash ON tasks(hash);
@@ -104,6 +119,8 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id);
     CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
     CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at);
+    CREATE INDEX IF NOT EXISTS idx_rclone_sync_history_server ON rclone_sync_history(server_id);
+    CREATE INDEX IF NOT EXISTS idx_rclone_sync_history_created ON rclone_sync_history(created_at);
   `);
 
   // 插入默认分类数据
@@ -290,6 +307,44 @@ class DatabaseManager {
       ORDER BY al.created_at DESC
       LIMIT ?
     `).all(limit);
+  }
+
+  // ========== rclone 同步历史操作 ==========
+  logRcloneSync(serverId, action, fromVersion = null, toVersion = null, success = true, errorMessage = null) {
+    const stmt = this.db.prepare(`
+      INSERT INTO rclone_sync_history (server_id, action, from_version, to_version, success, error_message)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    return stmt.run(serverId, action, fromVersion, toVersion, success ? 1 : 0, errorMessage);
+  }
+
+  getRcloneSyncHistory(serverId = null, limit = 50) {
+    let query = `
+      SELECT rsh.*, s.name as server_name
+      FROM rclone_sync_history rsh
+      LEFT JOIN servers s ON rsh.server_id = s.id
+    `;
+    
+    const params = [];
+    
+    if (serverId) {
+      query += ' WHERE rsh.server_id = ?';
+      params.push(serverId);
+    }
+    
+    query += ' ORDER BY rsh.created_at DESC LIMIT ?';
+    params.push(limit);
+    
+    return this.db.prepare(query).all(...params);
+  }
+
+  getLatestRcloneSync(serverId) {
+    return this.db.prepare(`
+      SELECT * FROM rclone_sync_history
+      WHERE server_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(serverId);
   }
 
   // 关闭数据库连接

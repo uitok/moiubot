@@ -22,10 +22,13 @@ let sessionId = null;
  */
 async function login() {
   try {
-    const response = await axiosInstance.post('/api/v2/auth/login', null, {
-      params: {
-        username: QBT_USERNAME,
-        password: QBT_PASSWORD
+    const formData = new URLSearchParams();
+    formData.append('username', QBT_USERNAME);
+    formData.append('password', QBT_PASSWORD);
+
+    const response = await axiosInstance.post('/api/v2/auth/login', formData, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
 

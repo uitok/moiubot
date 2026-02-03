@@ -33,11 +33,10 @@ async function handleAdd(ctx) {
   const keyboard = servers.map(s => [{ text: s.name, callback_data: `add_server_${s.id}` }]);
   keyboard.push([{ text: '❌ 取消', callback_data: 'add_cancel' }]);
 
-  await ctx.reply('🖥️ **选择服务器**\n\n请选择要添加种子的服务器:', {
+  await ctx.reply('🖥️ 选择服务器\n\n请选择要添加种子的服务器:', {
     reply_markup: {
       inline_keyboard: keyboard
-    },
-    parse_mode: 'Markdown'
+    }
   });
 }
 
@@ -73,12 +72,11 @@ async function handleAddCallback(ctx, callbackData, data) {
       session.state = SESSION_STATES.ADD_WAIT_TORRENT;
 
       await ctx.editMessageText(
-        `✅ 已选择服务器: **${server.name}**\n\n` +
+        `✅ 已选择服务器: ${server.name}\n\n` +
         `📎 请发送以下任意一种内容:\n` +
         `• Magnet 链接\n` +
         `• .torrent 文件\n` +
-        `• HTTP/HTTPS 链接`,
-        { parse_mode: 'Markdown' }
+        `• HTTP/HTTPS 链接`
       );
 
       return await ctx.answerCbQuery('服务器已选择');
@@ -112,9 +110,8 @@ async function handleAddCallback(ctx, callbackData, data) {
       ]);
       keyboard.push([{ text: '❌ 取消', callback_data: 'add_cancel' }]);
 
-      await ctx.editMessageText('☁️ **选择云存储**\n\n请选择目标云存储:', {
-        reply_markup: { inline_keyboard: keyboard },
-        parse_mode: 'Markdown'
+      await ctx.editMessageText('☁️ 选择云存储\n\n请选择目标云存储:', {
+        reply_markup: { inline_keyboard: keyboard }
       });
 
       return await ctx.answerCbQuery();
@@ -127,7 +124,6 @@ async function handleAddCallback(ctx, callbackData, data) {
       session.state = SESSION_STATES.ADD_SELECT_CATEGORY;
 
       // 显示分类选项
-      const categories = db.getAllCategories();
       const keyboard = categories.map(c => [
         { text: `${c.emoji} ${c.name}`, callback_data: `add_category_${c.id}` }
       ]);
@@ -136,9 +132,8 @@ async function handleAddCallback(ctx, callbackData, data) {
       ]);
       keyboard.push([{ text: '❌ 取消', callback_data: 'add_cancel' }]);
 
-      await ctx.editMessageText('📁 **选择目录**\n\n请选择目标目录:', {
-        reply_markup: { inline_keyboard: keyboard },
-        parse_mode: 'Markdown'
+      await ctx.editMessageText('📁 选择目录\n\n请选择目标目录:', {
+        reply_markup: { inline_keyboard: keyboard }
       });
 
       return await ctx.answerCbQuery();
@@ -257,11 +252,10 @@ async function handleAddTorrent(ctx) {
   ];
 
   await ctx.reply(
-    `✅ 已识别种子: **${fileName}**\n\n` +
+    `✅ 已识别种子: ${fileName}\n\n` +
     `📦 下载完成后是否需要自动移动到云存储？`,
     {
-      reply_markup: { inline_keyboard: keyboard },
-      parse_mode: 'Markdown'
+      reply_markup: { inline_keyboard: keyboard }
     }
   );
 }
@@ -280,12 +274,11 @@ async function addTorrentWithoutMove(ctx, session) {
 
     if (result.success) {
       await ctx.editMessageText(
-        `✅ **种子已添加**\n\n` +
+        `✅ 种子已添加\n\n` +
         `🖥️ 服务器: ${session.server.name}\n` +
         `📦 任务: ${session.torrentName}\n` +
-        `🔑 Hash: \`${result.hash}\`\n\n` +
-        `⬇️ 下载开始...`,
-        { parse_mode: 'Markdown' }
+        `🔑 Hash: ${result.hash}\n\n` +
+        `⬇️ 下载开始...`
       );
 
       // 记录到数据库
@@ -330,13 +323,12 @@ async function addTorrentWithMove(ctx, session) {
     if (result.success) {
       const destPath = `${moveConfig.remote}${moveConfig.dest}`;
       await ctx.editMessageText(
-        `✅ **种子已添加**\n\n` +
+        `✅ 种子已添加\n\n` +
         `🖥️ 服务器: ${session.server.name}\n` +
         `📦 任务: ${session.torrentName}\n` +
-        `🔑 Hash: \`${result.hash}\`\n\n` +
+        `🔑 Hash: ${result.hash}\n\n` +
         `⬇️ 下载完成后将自动移动到:\n` +
-        `📁 ${destPath}`,
-        { parse_mode: 'Markdown' }
+        `📁 ${destPath}`
       );
 
       // 记录到数据库

@@ -121,10 +121,31 @@ app.use((err, req, res, next) => {
 });
 
 // ========== 启动服务器 ==========
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   logger.info(`🚀 Agent 服务器启动成功`);
   logger.info(`📡 监听端口: ${PORT}`);
   logger.info(`🔑 API Key: ${API_KEY.substring(0, 10)}...`);
+
+  // rclone 配置同步
+  const { ensureRcloneConfig, RCLONE_SYNC_ON_START } = require('./services/rclone-sync');
+  if (RCLONE_SYNC_ON_START) {
+    try {
+      const syncResult = await ensureRcloneConfig();
+      if (syncResult.success) {
+        logger.info(`[rclone-sync] 配置同步成功: ${syncResult.message || 'OK'}`);
+        if (syncResult.version) {
+          logger.info(`[rclone-sync] 配置版本: ${syncResult.version}`);
+        }
+        if (syncResult.remotes) {
+          logger.info(`[rclone-sync] 可用 remotes: ${syncResult.remotes.length}`);
+        }
+      } else {
+        logger.error(`[rclone-sync] 配置同步失败: ${syncResult.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      logger.error(`[rclone-sync] 配置同步异常:`, error);
+    }
+  }
 
   // 启动下载监控
   const { startDownloadMonitor } = require('./services/download-monitor');
