@@ -360,7 +360,7 @@ GET  /api/rclone/list            # 列出文件
 
 ---
 
-## 🙏 致谢
+##  致谢
 
 - [Telegraf](https://telegraf.js.org/) - 优秀的 Telegram Bot 框架
 - [qBittorrent](https://www.qbittorrent.org/) - 强大的 BitTorrent 客户端
@@ -368,7 +368,7 @@ GET  /api/rclone/list            # 列出文件
 
 ---
 
-## 📞 支持
+##  支持
 
 - 📧 Email: [你的邮箱]
 - 💬 Telegram: [你的 Telegram]
@@ -382,6 +382,5 @@ GET  /api/rclone/list            # 列出文件
 
 <div align="center">
 
-**Made with ❤️ by [你的名字]**
 
 </div>
