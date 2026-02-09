@@ -42,8 +42,56 @@ function generateApiKey() {
  * 解析磁力链接
  */
 function parseMagnetLink(magnetUri) {
-  const match = magnetUri.match(/^magnet:\?xt=urn:(?:btih|sha1):([a-fA-F0-9]{40})/);
-  return match ? match[1] : null;
+  if (typeof magnetUri !== 'string') return null;
+  const input = magnetUri.trim();
+  if (!input.toLowerCase().startsWith('magnet:?')) return null;
+
+  // Minimal RFC4648 base32 decode (A-Z2-7), used for BTIH base32 hashes.
+  function decodeBase32ToHex(base32) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const clean = base32.toUpperCase().replace(/=+$/g, '');
+    let bits = 0;
+    let value = 0;
+    const out = [];
+
+    for (const ch of clean) {
+      const idx = alphabet.indexOf(ch);
+      if (idx === -1) return null;
+      value = (value << 5) | idx;
+      bits += 5;
+      while (bits >= 8) {
+        out.push((value >>> (bits - 8)) & 0xff);
+        bits -= 8;
+      }
+    }
+
+    return Buffer.from(out).toString('hex');
+  }
+
+  try {
+    const u = new URL(input);
+    const xts = u.searchParams.getAll('xt');
+
+    for (const xt of xts) {
+      const m = String(xt).match(/^urn:(?:btih|sha1):([a-zA-Z0-9]+)$/i);
+      if (!m) continue;
+
+      const raw = m[1];
+      if (/^[a-fA-F0-9]{40}$/.test(raw)) return raw.toLowerCase();
+      if (/^[a-zA-Z2-7]{32}$/.test(raw)) return decodeBase32ToHex(raw);
+    }
+  } catch (_) {
+    // Fall through to regex parsing.
+  }
+
+  // Fallback: tolerate xt not being the first query param.
+  const hexMatch = input.match(/[?&]xt=urn:(?:btih|sha1):([a-fA-F0-9]{40})(?:&|$)/i);
+  if (hexMatch) return hexMatch[1].toLowerCase();
+
+  const b32Match = input.match(/[?&]xt=urn:(?:btih|sha1):([a-zA-Z2-7]{32})(?:&|$)/i);
+  if (b32Match) return decodeBase32ToHex(b32Match[1]);
+
+  return null;
 }
 
 /**

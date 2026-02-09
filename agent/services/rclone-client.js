@@ -1,18 +1,29 @@
 /**
  * rclone CLI 封装
  */
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const { promisify } = require('util');
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const RCLONE_PATH = process.env.RCLONE_PATH || 'rclone';
 const RCLONE_CONFIG = process.env.RCLONE_CONFIG;
+
+// Simple in-memory cache for remotes list (kept in-process).
+// TTL: 5 minutes.
+const REMOTES_CACHE_TTL_MS = 300000;
+const remotesCache = {
+  value: null,
+  expiresAt: 0,
+  refreshing: null
+};
 
 /**
  * 执行 rclone 命令
  */
 async function execRclone(args, options = {}) {
-  const cmd = `${RCLONE_PATH} ${args}`;
+  if (!Array.isArray(args)) {
+    throw new Error('execRclone args must be an array of strings');
+  }
 
   const env = {
     ...process.env,
@@ -20,7 +31,7 @@ async function execRclone(args, options = {}) {
   };
 
   try {
-    const { stdout, stderr } = await execAsync(cmd, {
+    const { stdout, stderr } = await execFileAsync(RCLONE_PATH, args, {
       env,
       timeout: options.timeout || 300000,
       maxBuffer: 10 * 1024 * 1024 // 10MB buffer
@@ -45,28 +56,56 @@ async function execRclone(args, options = {}) {
  * 获取所有 remotes
  */
 async function getRemotes() {
-  const result = await execRclone('listremotes');
+  const now = Date.now();
 
-  if (!result.success) {
-    throw new Error(`获取 remotes 失败: ${result.error}`);
+  // Cache hit.
+  if (remotesCache.value !== null && now < remotesCache.expiresAt) {
+    return remotesCache.value;
   }
 
-  const remotes = [];
-  const lines = result.stdout.split('\n').filter(line => line.trim());
-
-  for (const line of lines) {
-    const name = line.replace(':', '').trim();
-    const typeResult = await execRclone(`about ${name}:`);
-
-    if (typeResult.success) {
-      remotes.push({
-        name: `${name}:`,
-        type: extractRemoteType(typeResult.stdout)
-      });
+  // De-duplicate concurrent refreshes.
+  if (remotesCache.refreshing) {
+    try {
+      return await remotesCache.refreshing;
+    } catch (error) {
+      if (remotesCache.value !== null) return remotesCache.value;
+      throw error;
     }
   }
 
-  return remotes;
+  const refreshPromise = (async () => {
+    const result = await execRclone(['listremotes']);
+
+    if (!result.success) {
+      // Do not clear an existing cache on failure; fall back when possible.
+      if (remotesCache.value !== null) return remotesCache.value;
+      throw new Error(`获取 remotes 失败: ${result.error}`);
+    }
+
+    const remotes = [];
+    const lines = result.stdout.split('\n').filter(line => line.trim());
+
+    for (const line of lines) {
+      const name = line.replace(':', '').trim();
+      const typeResult = await execRclone(['about', `${name}:`]);
+
+      remotes.push({
+        name: `${name}:`,
+        type: typeResult.success ? extractRemoteType(typeResult.stdout) : 'Unknown'
+      });
+    }
+
+    remotesCache.value = remotes;
+    remotesCache.expiresAt = Date.now() + REMOTES_CACHE_TTL_MS;
+    return remotes;
+  })();
+
+  remotesCache.refreshing = refreshPromise;
+  try {
+    return await refreshPromise;
+  } finally {
+    if (remotesCache.refreshing === refreshPromise) remotesCache.refreshing = null;
+  }
 }
 
 /**
@@ -87,15 +126,15 @@ function extractRemoteType(aboutOutput) {
 async function moveFile(sourcePath, remote, destPath, options = {}) {
   const { deleteAfterMove = true } = options;
 
-  // 构建 rclone move 命令
   const args = [
     'move',
-    `"${sourcePath}"`,
+    sourcePath,
     `${remote}${destPath}`,
     '--progress',
-    '--stats=1s',
-    deleteAfterMove ? '--delete-empty-src-dirs' : ''
-  ].filter(Boolean).join(' ');
+    '--stats=1s'
+  ];
+
+  if (deleteAfterMove) args.push('--delete-empty-src-dirs');
 
   const result = await execRclone(args, {
     timeout: options.timeout || 3600000 // 1小时默认超时
@@ -117,8 +156,7 @@ async function moveFile(sourcePath, remote, destPath, options = {}) {
  * 列出文件
  */
 async function listFiles(remote, path = '') {
-  const args = `lsjson "${remote}${path}"`;
-  const result = await execRclone(args, { timeout: 30000 });
+  const result = await execRclone(['lsjson', `${remote}${path}`], { timeout: 30000 });
 
   if (!result.success) {
     throw new Error(`列出文件失败: ${result.error}`);
@@ -135,8 +173,7 @@ async function listFiles(remote, path = '') {
  * 获取 remote 存储空间
  */
 async function getAbout(remote) {
-  const args = `about ${remote}`;
-  const result = await execRclone(args, { timeout: 30000 });
+  const result = await execRclone(['about', remote], { timeout: 30000 });
 
   if (!result.success) {
     throw new Error(`获取空间信息失败: ${result.error}`);
@@ -161,8 +198,7 @@ async function getAbout(remote) {
  * 获取磁盘使用情况
  */
 async function getDiskUsage(remote, path = '') {
-  const args = `size "${remote}${path}"`;
-  const result = await execRclone(args, { timeout: 60000 });
+  const result = await execRclone(['size', `${remote}${path}`], { timeout: 60000 });
 
   if (!result.success) {
     throw new Error(`获取磁盘使用情况失败: ${result.error}`);
@@ -187,7 +223,7 @@ async function getDiskUsage(remote, path = '') {
  * 测试 remote 连接
  */
 async function testRemote(remote) {
-  const result = await execRclone(`ls ${remote}:`, { timeout: 10000 });
+  const result = await execRclone(['ls', `${remote}:`], { timeout: 10000 });
   return result.success;
 }
 

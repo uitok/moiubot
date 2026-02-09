@@ -3,34 +3,54 @@
  */
 require('dotenv').config({ path: '.env.bot' });
 const { Telegraf } = require('telegraf');
-const { DatabaseManager, initDatabase } = require('./config/database');
+const { initDatabase } = require('./config/database');
+const { createLogger } = require('../shared/logger');
+const { MESSAGES } = require('./config/constants');
+
+const logger = createLogger('bot');
 
 // 初始化数据库表
-console.log('📦 正在初始化数据库...');
+logger.info('📦 正在初始化数据库...');
 try {
   initDatabase();
-  console.log('✅ 数据库初始化成功');
+  logger.info('✅ 数据库初始化成功');
 } catch (error) {
-  console.error('❌ 数据库初始化失败:', error);
+  logger.error('❌ 数据库初始化失败', { err: { message: error.message, stack: error.stack } });
   process.exit(1);
 }
 
 // 导入处理器
-const { handleStart } = require('./handlers/start-simple');
+const { handleStart } = require('./handlers/start');
 const { handleServers } = require('./handlers/servers');
 const { handleStatus } = require('./handlers/status');
+const {
+  handleAddServer,
+  handleAddServerText,
+  handleRemoveServer,
+  handleTestServer
+} = require('./handlers/server-management');
+const {
+  handleList,
+  handlePause,
+  handleResume,
+  handleDelete
+} = require('./handlers/task-management');
+const { startWebhookServer } = require('./webhook-server');
 const {
   handleAdd,
   handleAddCallback,
   handleAddText,
   handleAddTorrent
 } = require('./handlers/add');
-
-// 初始化数据库管理器
-const db = new DatabaseManager();
+const { userSessions } = require('./services/session-store');
 
 // 创建 Bot 实例
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+const token = process.env.TELEGRAM_BOT_TOKEN;
+if (!token) {
+  logger.error('TELEGRAM_BOT_TOKEN 未配置，请在 .env.bot 中设置。');
+  process.exit(1);
+}
+const bot = new Telegraf(token);
 
 // 用户白名单
 const ALLOWED_USERS = (process.env.ALLOWED_USERS || '')
@@ -47,7 +67,7 @@ bot.use((ctx, next) => {
   }
 
   if (ALLOWED_USERS.length > 0 && !ALLOWED_USERS.includes(telegramId)) {
-    console.log(`未授权用户尝试访问: ${telegramId} (@${ctx.from.username})`);
+    logger.warn('未授权用户尝试访问', { telegramId, username: ctx.from.username });
     return ctx.reply('❌ 你没有权限使用此 Bot');
   }
 
@@ -61,28 +81,7 @@ bot.start((ctx) => handleStart(ctx));
 
 // /help - 帮助信息
 bot.help((ctx) => {
-  ctx.reply(
-    `📖 命令列表\n\n` +
-    `【基础命令】\n` +
-    `/start - 开始使用\n` +
-    `/servers - 查看所有服务器状态\n` +
-    `/status [服务器名] - 查看服务器详细状态\n` +
-    `/help - 显示帮助信息\n\n` +
-    `【下载管理】\n` +
-    `/add - 添加种子（交互式）\n` +
-    `/list - 查看下载任务\n` +
-    `/pause [hash] - 暂停任务\n` +
-    `/resume [hash] - 恢复任务\n` +
-    `/delete [hash] - 删除任务\n\n` +
-    `【服务器管理】\n` +
-    `/add_server - 添加服务器\n` +
-    `/remove_server [名称] - 删除服务器\n` +
-    `/test_server [名称] - 测试连接\n\n` +
-    `【其他】\n` +
-    `/categories - 管理分类\n` +
-    `/logs - 查看操作日志\n` +
-    `/cancel - 取消当前操作`
-  );
+  ctx.reply(MESSAGES.HELP);
 });
 
 // /servers - 服务器列表
@@ -91,12 +90,32 @@ bot.command('servers', (ctx) => handleServers(ctx));
 // /status - 服务器状态
 bot.command('status', (ctx) => handleStatus(ctx));
 
+// /add_server - 添加服务器
+bot.command('add_server', (ctx) => handleAddServer(ctx));
+
+// /remove_server - 删除（禁用）服务器
+bot.command('remove_server', (ctx) => handleRemoveServer(ctx));
+
+// /test_server - 测试服务器连通性
+bot.command('test_server', (ctx) => handleTestServer(ctx));
+
 // /add - 添加种子
 bot.command('add', (ctx) => handleAdd(ctx));
 
+// /list - 列出任务
+bot.command('list', (ctx) => handleList(ctx));
+
+// /pause - 暂停任务
+bot.command('pause', (ctx) => handlePause(ctx));
+
+// /resume - 恢复任务
+bot.command('resume', (ctx) => handleResume(ctx));
+
+// /delete - 删除任务
+bot.command('delete', (ctx) => handleDelete(ctx));
+
 // /cancel - 取消操作
 bot.command('cancel', (ctx) => {
-  const { userSessions } = require('./handlers/add');
   if (userSessions.has(ctx.from.id)) {
     userSessions.delete(ctx.from.id);
     ctx.reply('✅ 当前操作已取消');
@@ -113,13 +132,9 @@ bot.on('callback_query', async (ctx) => {
 
   if (!callbackData) return;
 
-  // 解析回调数据
-  const [action, ...params] = callbackData.split('_');
-  const data = params.join('_');
-
   // 路由到不同的处理器
   if (callbackData.startsWith('add_')) {
-    await handleAddCallback(ctx, callbackData, data);
+    await handleAddCallback(ctx, callbackData);
   } else {
     await ctx.answerCbQuery('未知操作');
   }
@@ -128,8 +143,10 @@ bot.on('callback_query', async (ctx) => {
 // ========== 消息处理 ==========
 
 // 处理文本消息（用于自定义路径等）
-bot.on('text', (ctx) => {
-  handleAddText(ctx);
+bot.on('text', async (ctx) => {
+  await handleAddServerText(ctx);
+  await handleAddText(ctx);
+  await handleAddTorrent(ctx);
 });
 
 // 处理文档消息（.torrent 文件）
@@ -140,28 +157,45 @@ bot.on('document', (ctx) => {
 // ========== 错误处理 ==========
 
 bot.catch((err, ctx) => {
-  console.error('Bot 错误:', err);
+  logger.error('Bot 错误', { err: { message: err.message, stack: err.stack } });
   ctx.reply('❌ 发生错误，请稍后重试');
 });
 
 // ========== 启动 Bot ==========
 
-console.log('🤖 MoiuBot 正在启动...');
+logger.info('🤖 MoiuBot 正在启动...');
+
+let webhook = null;
 
 // 启动轮询
 bot.launch()
   .then(() => {
-    console.log('✅ MoiuBot 启动成功!');
-    console.log(`📝 允许的用户: ${ALLOWED_USERS.join(', ')}`);
+    logger.info('✅ MoiuBot 启动成功!');
+    logger.info(`📝 允许的用户: ${ALLOWED_USERS.join(', ') || 'ALL'}`);
+
+    // Start webhook server (Agent -> Bot) if BOT_WEBHOOK_PORT is configured.
+    webhook = startWebhookServer({ bot, logger });
   })
   .catch((error) => {
-    console.error('❌ Bot 启动失败:', error);
+    logger.error('❌ Bot 启动失败', { err: { message: error.message, stack: error.stack } });
     process.exit(1);
   });
 
 // 优雅退出
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+function shutdown(signal) {
+  try {
+    bot.stop(signal);
+  } finally {
+    if (webhook?.server) {
+      webhook.server.close(() => {
+        logger.info('Webhook server closed');
+      });
+    }
+  }
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));
 
 // 定期更新用户最后活跃时间
 setInterval(() => {

@@ -12,8 +12,8 @@ const db = new DatabaseManager();
  */
 async function handleStart(ctx) {
   const telegramId = ctx.from.id;
-  const username = ctx.from.username;
-  const firstName = ctx.from.first_name;
+  const username = ctx.from.username || null;
+  const firstName = ctx.from.first_name || null;
 
   console.log(`📥 收到 /start 命令 from: ${telegramId} (@${username || 'N/A'})`);
 
@@ -26,7 +26,8 @@ async function handleStart(ctx) {
       // 创建新用户
       console.log(`➕ 创建新用户: ${telegramId}`);
       db.createUser(telegramId, username, firstName);
-      db.logActivity(null, 'user_created', null, { telegramId, username });
+      user = db.getUserByTelegramId(telegramId);
+      db.logActivity(user?.id || null, 'user_created', null, { telegramId, username });
 
       // 使用纯文本，不使用 Markdown
       await ctx.reply(`${MESSAGES.WELCOME}\n\n🎉 新用户注册成功！\n\n使用 /help 查看所有命令。`);

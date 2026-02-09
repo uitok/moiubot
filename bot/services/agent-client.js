@@ -28,14 +28,20 @@ class AgentClient {
       };
 
       if (data) {
-        config.data = data;
+        const m = String(method).toUpperCase();
+        // Agent 端的 GET/DELETE 接口主要使用 query string 参数。
+        if (m === 'GET' || m === 'DELETE') config.params = data;
+        else config.data = data;
       }
 
       const response = await axios(config);
       return response.data;
     } catch (error) {
       if (error.response) {
-        throw new Error(`Agent 返回错误: ${error.response.data?.error || error.response.statusText}`);
+        const payload = error.response.data || {};
+        const msg = payload.error || payload.message || error.response.statusText || 'Agent error';
+        const code = payload.code ? ` (${payload.code})` : '';
+        throw new Error(`Agent 返回错误: ${msg}${code}`);
       } else if (error.request) {
         throw new Error('无法连接到 Agent 服务器');
       } else {
@@ -75,7 +81,8 @@ class AgentClient {
   }
 
   async deleteTorrent(hash, deleteFiles = false) {
-    return this.request('DELETE', `/api/qb/delete/${hash}`, { deleteFiles });
+    // Agent 端使用 query 参数 deleteFiles=true/false
+    return this.request('DELETE', `/api/qb/delete/${hash}`, { deleteFiles: deleteFiles ? 'true' : 'false' });
   }
 
   // ========== rclone 操作 ==========

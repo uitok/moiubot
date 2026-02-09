@@ -5,7 +5,9 @@
 require('dotenv').config({ path: '.env.agent' });
 const express = require('express');
 const cors = require('cors');
-const winston = require('winston');
+const { createLogger } = require('../shared/logger');
+const { requestLogger, notFoundHandler, errorHandler } = require('../shared/express');
+const { apiKeyAuth } = require('../shared/middleware/api-key');
 
 // 导入路由
 const qbRoutes = require('./routes/qb');
@@ -14,66 +16,36 @@ const systemRoutes = require('./routes/system');
 
 // 创建 Express 应用
 const app = express();
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY;
+const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const API_KEY = process.env.API_KEY || 'sk_agent_default_key';
 
 // 配置日志
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    new winston.transports.File({ filename: 'logs/agent.log' })
-  ]
-});
+const logger = createLogger('agent');
+
+if (!process.env.API_KEY) {
+  logger.warn('API_KEY 未设置，正在使用默认值 sk_agent_default_key。请在 .env.agent 中配置一个强随机值。');
+}
 
 // 中间件
 app.use(cors());
 app.use(express.json());
 
-// 请求日志
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`);
-  next();
-});
-
-// API Key 认证中间件
-function authenticateApiKey(req, res, next) {
-  const apiKey = req.headers['x-api-key'];
-
-  if (!apiKey || apiKey !== API_KEY) {
-    logger.warn(`未授权的访问尝试: ${req.ip}`);
-    return res.status(401).json({
-      success: false,
-      error: 'Unauthorized',
-      code: 'INVALID_API_KEY'
-    });
-  }
-
-  next();
-}
+// 请求日志（响应结束后记录状态码与耗时）
+app.use(requestLogger(logger));
 
 // 应用认证到所有 API 路由
-app.use('/api/', authenticateApiKey);
+app.use('/api', apiKeyAuth({ apiKey: API_KEY, logger }));
 
 // ========== 健康检查 ==========
 app.get('/api/health', async (req, res) => {
   try {
     const { isQBConnected } = require('./services/qb-client');
-
     const qbConnected = await isQBConnected();
 
     res.json({
       success: true,
       data: {
+        service: 'agent',
         status: 'healthy',
         uptime: process.uptime(),
         memory: process.memoryUsage(),
@@ -82,11 +54,8 @@ app.get('/api/health', async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('健康检查失败:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Health check failed'
-    });
+    logger.error('健康检查失败', { err: { message: error.message, stack: error.stack } });
+    res.status(500).json({ success: false, error: 'Health check failed', code: 'HEALTH_CHECK_FAILED' });
   }
 });
 
@@ -102,29 +71,16 @@ app.use('/api/rclone', rcloneRoutes);
 app.use('/api/system', systemRoutes);
 
 // ========== 404 处理 ==========
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Endpoint not found',
-    code: 'NOT_FOUND'
-  });
-});
+app.use(notFoundHandler());
 
 // ========== 错误处理 ==========
-app.use((err, req, res, next) => {
-  logger.error('服务器错误:', err);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
-    code: 'INTERNAL_ERROR'
-  });
-});
+app.use(errorHandler(logger));
 
 // ========== 启动服务器 ==========
 const server = app.listen(PORT, async () => {
   logger.info(`🚀 Agent 服务器启动成功`);
   logger.info(`📡 监听端口: ${PORT}`);
-  logger.info(`🔑 API Key: ${API_KEY.substring(0, 10)}...`);
+  logger.info(`🔑 API Key: ${String(API_KEY).slice(0, 10)}...`);
 
   // rclone 配置同步
   const { ensureRcloneConfig, RCLONE_SYNC_ON_START } = require('./services/rclone-sync');
@@ -149,7 +105,7 @@ const server = app.listen(PORT, async () => {
 
   // 启动下载监控
   const { startDownloadMonitor } = require('./services/download-monitor');
-  startDownloadMonitor();
+  startDownloadMonitor({ logger });
 });
 
 // 优雅退出
@@ -167,6 +123,15 @@ process.on('SIGINT', () => {
     logger.info('服务器已关闭');
     process.exit(0);
   });
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', { reason });
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception', { err: { message: error.message, stack: error.stack } });
+  process.exit(1);
 });
 
 module.exports = { app, logger };

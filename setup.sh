@@ -75,7 +75,7 @@ if [ -n "$BOT_TOKEN" ]; then
     cat > /home/admin/github/moiubot/.env.bot << EOF
 # Bot Configuration
 TELEGRAM_BOT_TOKEN=$BOT_TOKEN
-DATABASE_PATH=../database/qbt-bot.db
+DATABASE_PATH=/home/admin/github/moiubot/database/qbt-bot.db
 LOG_LEVEL=info
 
 # Allowed Users (comma-separated Telegram IDs)

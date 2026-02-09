@@ -5,6 +5,7 @@
 const { DatabaseManager } = require('../config/database');
 const { MESSAGES } = require('../config/constants');
 const AgentClient = require('../services/agent-client');
+const { formatSpeed } = require('../../shared/utils');
 
 const db = new DatabaseManager();
 
@@ -25,18 +26,38 @@ async function handleServers(ctx) {
         const client = new AgentClient(server.url, server.api_key);
         const health = await client.healthCheck();
 
-        return {
+        const base = {
           ...server,
           status: health.success ? '🟢 在线' : '🔴 离线',
-          qbConnected: health.data?.qbConnected ? '✅' : '❌',
-          torrents: health.data?.torrentCount || 0
+          qbConnected: health.data?.qbConnected ? '✅' : '❌'
         };
+
+        if (!health.success || !health.data?.qbConnected) {
+          return { ...base, torrents: '-', downloading: '-', dlSpeed: 0, upSpeed: 0 };
+        }
+
+        // qBittorrent 详情（可能失败；失败时保持在线状态）
+        try {
+          const qb = await client.getQBStatus();
+          return {
+            ...base,
+            torrents: qb.data?.torrentCount ?? '-',
+            downloading: qb.data?.downloadingCount ?? '-',
+            dlSpeed: qb.data?.dlSpeed ?? 0,
+            upSpeed: qb.data?.upSpeed ?? 0
+          };
+        } catch (e) {
+          return { ...base, torrents: '-', downloading: '-', dlSpeed: 0, upSpeed: 0 };
+        }
       } catch (error) {
         return {
           ...server,
           status: '🔴 离线',
           qbConnected: '❌',
-          torrents: 0
+          torrents: '-',
+          downloading: '-',
+          dlSpeed: 0,
+          upSpeed: 0
         };
       }
     });
@@ -49,7 +70,10 @@ async function handleServers(ctx) {
     serverStatuses.forEach((server, index) => {
       message += `${index + 1}. ${server.name}\n`;
       message += `   ${server.status} | qBittorrent: ${server.qbConnected}\n`;
-      message += `   任务数: ${server.torrents}\n`;
+      message += `   任务数: ${server.torrents} | 下载中: ${server.downloading}\n`;
+      if (server.dlSpeed || server.upSpeed) {
+        message += `   速度: ⬇️ ${formatSpeed(server.dlSpeed)} | ⬆️ ${formatSpeed(server.upSpeed)}\n`;
+      }
       message += `   URL: ${server.url}\n\n`;
     });
 

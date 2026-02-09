@@ -33,13 +33,15 @@ async function handleStatus(ctx) {
 
     // 获取系统信息
     const systemInfo = await client.getSystemInfo();
-    const torrents = await client.getTorrents();
+    const torrentsRes = await client.getTorrents();
 
     if (!systemInfo.success) {
       return await ctx.reply(`❌ 无法获取服务器信息: ${systemInfo.error}`);
     }
 
     const info = systemInfo.data;
+    const torrents = Array.isArray(torrentsRes.data) ? torrentsRes.data : [];
+
     const downloading = torrents.filter(t =>
       ['downloading', 'stalledDL'].includes(t.state)
     );
@@ -51,7 +53,9 @@ async function handleStatus(ctx) {
 
     // 磁盘使用情况
     if (info.disk) {
-      const usedPercent = ((info.disk.used / info.disk.total) * 100).toFixed(1);
+      const usedPercent = typeof info.disk.usagePercent === 'number'
+        ? info.disk.usagePercent.toFixed(1)
+        : (info.disk.total ? ((info.disk.used / info.disk.total) * 100).toFixed(1) : '0.0');
       message += `💾 磁盘空间\n`;
       message += `   已用: ${formatBytes(info.disk.used)} / ${formatBytes(info.disk.total)}\n`;
       message += `   使用率: ${usedPercent}%\n\n`;

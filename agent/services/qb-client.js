@@ -14,8 +14,9 @@ const axiosInstance = axios.create({
   timeout: 30000
 });
 
-// Session ID
-let sessionId = null;
+// Session cookie (e.g. "SID=...") for qBittorrent API.
+let sessionCookie = null;
+let loginPromise = null;
 
 /**
  * 登录并获取 Session ID
@@ -32,13 +33,23 @@ async function login() {
       }
     });
 
-    // 保存 Session ID
-    const cookies = response.headers['set-cookie'];
-    if (cookies) {
-      sessionId = cookies.find(c => c.startsWith('SID='));
+    // qBittorrent returns "Ok." on success, "Fails." on failure.
+    if (typeof response.data === 'string' && response.data.trim() !== 'Ok.') {
+      throw new Error(`qBittorrent 登录失败: ${response.data}`);
     }
 
-    return true;
+    // 保存 Session Cookie
+    const cookies = response.headers['set-cookie'];
+    if (cookies) {
+      const sidCookie = cookies.find(c => c.startsWith('SID='));
+      sessionCookie = sidCookie ? sidCookie.split(';')[0] : null;
+    }
+
+    if (!sessionCookie) {
+      throw new Error('qBittorrent 登录成功但未收到 SID Cookie');
+    }
+
+    return sessionCookie;
   } catch (error) {
     throw new Error(`qBittorrent 登录失败: ${error.message}`);
   }
@@ -48,15 +59,21 @@ async function login() {
  * 确保已登录
  */
 async function ensureLoggedIn() {
-  if (!sessionId) {
-    await login();
+  if (sessionCookie) return;
+
+  if (!loginPromise) {
+    loginPromise = login().finally(() => {
+      loginPromise = null;
+    });
   }
+
+  await loginPromise;
 }
 
 /**
  * 发送 API 请求
  */
-async function request(endpoint, method = 'GET', data = null) {
+async function request(endpoint, method = 'GET', data = null, attempt = 0) {
   await ensureLoggedIn();
 
   try {
@@ -66,8 +83,8 @@ async function request(endpoint, method = 'GET', data = null) {
       headers: {}
     };
 
-    if (sessionId) {
-      config.headers['Cookie'] = sessionId;
+    if (sessionCookie) {
+      config.headers['Cookie'] = sessionCookie;
     }
 
     if (data) {
@@ -81,21 +98,19 @@ async function request(endpoint, method = 'GET', data = null) {
 
     const response = await axiosInstance(config);
 
-    // 处理 403 (Session 过期)
-    if (response.status === 403) {
-      sessionId = null;
-      await ensureLoggedIn();
-      return request(endpoint, method, data);
-    }
-
     return response.data;
   } catch (error) {
-    if (error.response?.status === 403) {
-      sessionId = null;
+    // Handle 403 (session expired) with a single retry.
+    if (error.response?.status === 403 && attempt < 1) {
+      sessionCookie = null;
       await ensureLoggedIn();
-      return request(endpoint, method, data);
+      return request(endpoint, method, data, attempt + 1);
     }
-    throw error;
+
+    const status = error.response?.status;
+    const statusText = error.response?.statusText;
+    const suffix = status ? ` (${status}${statusText ? ` ${statusText}` : ''})` : '';
+    throw new Error(`qBittorrent API 请求失败: ${method} ${endpoint}${suffix}: ${error.message}`);
   }
 }
 
@@ -111,8 +126,8 @@ async function getVersion() {
 /**
  * 获取所有种子信息
  */
-async function getTorrents() {
-  return await request('/api/v2/torrents/info');
+async function getTorrents(params = null) {
+  return await request('/api/v2/torrents/info', 'GET', params);
 }
 
 /**
@@ -132,6 +147,8 @@ async function addTorrent(url, options = {}) {
     savepath: options.savePath || '',
     category: options.category || ''
   };
+
+  if (options.tags) params.tags = options.tags;
 
   return await request('/api/v2/torrents/add', 'POST', params);
 }
@@ -161,7 +178,7 @@ async function addTorrentFile(fileBuffer, options = {}) {
   const response = await axiosInstance.post('/api/v2/torrents/add', form, {
     headers: {
       ...form.getHeaders(),
-      'Cookie': sessionId
+      'Cookie': sessionCookie
     }
   });
 
@@ -186,8 +203,7 @@ async function resumeTorrent(hash) {
  * 删除种子
  */
 async function deleteTorrent(hash, deleteFiles = false) {
-  const endpoint = deleteFiles ? '/api/v2/torrents/delete' : '/api/v2/torrents/delete';
-  return await request(endpoint, 'POST', {
+  return await request('/api/v2/torrents/delete', 'POST', {
     hashes: hash,
     deleteFiles: deleteFiles.toString()
   });
@@ -233,12 +249,18 @@ async function getGlobalInfo() {
   };
 }
 
-// 初始化：预先登录
-login().catch(err => {
-  console.error('qBittorrent 初始登录失败:', err.message);
-});
+/**
+ * 清除当前 session cookie。
+ * 主要用于测试/诊断或在上层明确希望强制重新登录时使用。
+ */
+function resetSession() {
+  sessionCookie = null;
+}
 
 module.exports = {
+  // low-level helpers (mostly for diagnostics)
+  resetSession,
+  // qBittorrent API
   getVersion,
   getTorrents,
   getTorrentInfo,

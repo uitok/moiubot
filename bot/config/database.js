@@ -21,6 +21,41 @@ const db = new Database(DB_PATH);
 db.pragma('foreign_keys = ON');
 
 /**
+ * better-sqlite3 只接受 numbers/strings/bigints/buffers/null。
+ * 这里做统一兜底，避免 boolean/undefined/object/array 直接参与绑定导致崩溃。
+ */
+function safeJsonStringify(value) {
+  try {
+    const json = JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+    return json === undefined ? null : json;
+  } catch (_e) {
+    try {
+      return JSON.stringify({ value: String(value) });
+    } catch (_e2) {
+      return String(value);
+    }
+  }
+}
+
+function normalizeSqliteParam(value) {
+  if (value === undefined || value === null) return null;
+  const t = typeof value;
+  if (t === 'boolean') return value ? 1 : 0;
+  if (t === 'number') return Number.isFinite(value) ? value : null;
+  if (t === 'string' || t === 'bigint') return value;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Date) return value.toISOString();
+  // objects/arrays/functions/symbols => store as JSON-ish string best-effort
+  return safeJsonStringify(value);
+}
+
+function normalizeLogDetails(details) {
+  if (details === undefined || details === null) return null;
+  if (typeof details === 'string') return details;
+  return safeJsonStringify(details);
+}
+
+/**
  * 初始化数据库表结构
  */
 function initDatabase() {
@@ -169,7 +204,11 @@ class DatabaseManager {
       INSERT INTO users (telegram_id, username, first_name)
       VALUES (?, ?, ?)
     `);
-    return stmt.run(telegramId, username, firstName);
+    return stmt.run(
+      normalizeSqliteParam(telegramId),
+      normalizeSqliteParam(username),
+      normalizeSqliteParam(firstName)
+    );
   }
 
   updateUserLastSeen(telegramId) {
@@ -201,6 +240,24 @@ class DatabaseManager {
     return stmt.run(name, url, apiKey);
   }
 
+  enableServer(id) {
+    const stmt = this.db.prepare(`
+      UPDATE servers
+      SET enabled = 1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    return stmt.run(id);
+  }
+
+  disableServer(id) {
+    const stmt = this.db.prepare(`
+      UPDATE servers
+      SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    return stmt.run(id);
+  }
+
   updateServer(id, name, url, apiKey) {
     const stmt = this.db.prepare(`
       UPDATE servers
@@ -219,8 +276,24 @@ class DatabaseManager {
     const stmt = this.db.prepare(`
       INSERT INTO tasks (user_id, server_id, hash, name, auto_move, move_remote, move_dest)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(hash) DO UPDATE SET
+        user_id = excluded.user_id,
+        server_id = excluded.server_id,
+        name = excluded.name,
+        status = 'downloading',
+        auto_move = excluded.auto_move,
+        move_remote = excluded.move_remote,
+        move_dest = excluded.move_dest
     `);
-    return stmt.run(userId, serverId, hash, name, autoMove, moveRemote, moveDest);
+    return stmt.run(
+      normalizeSqliteParam(userId),
+      normalizeSqliteParam(serverId),
+      normalizeSqliteParam(hash),
+      normalizeSqliteParam(name),
+      normalizeSqliteParam(autoMove),
+      normalizeSqliteParam(moveRemote),
+      normalizeSqliteParam(moveDest)
+    );
   }
 
   getTaskByHash(hash) {
@@ -228,6 +301,20 @@ class DatabaseManager {
       SELECT t.*, s.name as server_name
       FROM tasks t
       LEFT JOIN servers s ON t.server_id = s.id
+      WHERE t.hash = ?
+    `).get(hash);
+  }
+
+  getTaskWithUserByHash(hash) {
+    return this.db.prepare(`
+      SELECT
+        t.*,
+        s.name as server_name,
+        u.telegram_id as telegram_id,
+        u.username as username
+      FROM tasks t
+      LEFT JOIN servers s ON t.server_id = s.id
+      LEFT JOIN users u ON t.user_id = u.id
       WHERE t.hash = ?
     `).get(hash);
   }
@@ -241,6 +328,10 @@ class DatabaseManager {
       ORDER BY t.created_at DESC
       LIMIT ?
     `).all(userId, limit);
+  }
+
+  deleteTaskByHash(hash) {
+    return this.db.prepare('DELETE FROM tasks WHERE hash = ?').run(hash);
   }
 
   updateTaskStatus(hash, status) {
@@ -296,7 +387,12 @@ class DatabaseManager {
       INSERT INTO activity_log (user_id, action, server_name, details)
       VALUES (?, ?, ?, ?)
     `);
-    return stmt.run(userId, action, serverName, JSON.stringify(details));
+    return stmt.run(
+      normalizeSqliteParam(userId),
+      normalizeSqliteParam(action),
+      normalizeSqliteParam(serverName),
+      normalizeLogDetails(details)
+    );
   }
 
   getRecentLogs(limit = 50) {

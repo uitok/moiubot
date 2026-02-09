@@ -1,9 +1,9 @@
 /**
- * 常量定义 - 纯文本版本（不使用 Markdown）
+ * 常量定义（纯文本版本，不使用 Markdown）
  */
 
 // Bot 命令列表
-export const COMMANDS = {
+const COMMANDS = {
   START: 'start',
   ADD: 'add',
   SERVERS: 'servers',
@@ -25,7 +25,7 @@ export const COMMANDS = {
 };
 
 // Bot 消息文本（纯文本，不包含任何 Markdown 格式）
-export const MESSAGES = {
+const MESSAGES = {
   WELCOME: `欢迎使用 MoiuBot！
 
 这是一个 qBittorrent 分布式管理机器人，支持：
@@ -49,7 +49,7 @@ export const MESSAGES = {
 /list - 查看下载任务
 /pause [hash] - 暂停任务
 /resume [hash] - 恢复任务
-/delete [hash] - 删除任务
+/delete [序号|hash] - 删除任务
 /move [hash] - 手动移动文件
 
 【服务器管理】
@@ -72,7 +72,7 @@ export const MESSAGES = {
 };
 
 // 下载状态文本
-export const TORRENT_STATUS_TEXT = {
+const TORRENT_STATUS_TEXT = {
   downloading: '下载中',
   paused: '暂停',
   completed: '完成',
@@ -87,7 +87,7 @@ export const TORRENT_STATUS_TEXT = {
 };
 
 // 任务状态文本
-export const TASK_STATUS_TEXT = {
+const TASK_STATUS_TEXT = {
   downloading: '下载中',
   completed: '已完成',
   moving: '移动中',
@@ -97,7 +97,7 @@ export const TASK_STATUS_TEXT = {
 };
 
 // 会话状态
-export const SESSION_STATES = {
+const SESSION_STATES = {
   IDLE: 'idle',
   ADD_SERVER_NAME: 'add_server_name',
   ADD_SERVER_URL: 'add_server_url',
@@ -106,5 +106,14 @@ export const SESSION_STATES = {
   ADD_WAIT_TORRENT: 'add_wait_torrent',
   ADD_ASK_MOVE: 'add_ask_move',
   ADD_SELECT_REMOTE: 'add_select_remote',
-  ADD_SELECT_CATEGORY: 'add_select_category'
+  ADD_SELECT_CATEGORY: 'add_select_category',
+  ADD_CUSTOM_PATH: 'add_custom_path'
+};
+
+module.exports = {
+  COMMANDS,
+  MESSAGES,
+  TORRENT_STATUS_TEXT,
+  TASK_STATUS_TEXT,
+  SESSION_STATES
 };

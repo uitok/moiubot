@@ -2,29 +2,43 @@
  * 下载监控服务
  * 监控 qBittorrent 下载完成状态，触发自动移动
  */
-const { getTorrents, getTorrentInfo, getTorrentFiles, deleteTorrent } = require('./qb-client');
-const { moveFile, getRemotes } = require('./rclone-client');
-const fs = require('fs');
+const { getTorrents, getTorrentFiles, deleteTorrent } = require('./qb-client');
+const { moveFile } = require('./rclone-client');
 const path = require('path');
 const axios = require('axios');
 
 // 配置
 const MONITOR_INTERVAL = parseInt(process.env.MONITOR_INTERVAL) || 30000; // 30秒
 const MOVE_TIMEOUT = parseInt(process.env.MOVE_TIMEOUT) || 3600000; // 1小时
+const MOVE_TASK_TTL = parseInt(process.env.MOVE_TASK_TTL) || 24 * 60 * 60 * 1000; // 24小时
 
-// 内存存储待移动任务（生产环境应使用数据库��
+// 内存存储待移动任务（生产环境建议使用数据库或队列）
 const pendingMoves = new Map();
 const movingTasks = new Set();
 
 // Bot Webhook URL（用于通知）
-let BOT_WEBHOOK_URL = null;
+let BOT_WEBHOOK_URL = process.env.BOT_WEBHOOK_URL || null;
+const BOT_WEBHOOK_API_KEY = process.env.BOT_WEBHOOK_API_KEY || null;
+
+let _logger = null;
+let _isChecking = false;
+
+function log(level, message, meta) {
+  if (_logger) return _logger[level](message, meta);
+  // Fallback to console for local/debug usage.
+  // eslint-disable-next-line no-console
+  console[level === 'warn' ? 'warn' : level === 'error' ? 'error' : 'log'](message, meta || '');
+}
 
 /**
  * 启动下载监控
  */
-function startDownloadMonitor() {
-  console.log('🔍 启动下载监控服务...');
-  console.log(`⏱️ 检查间隔: ${MONITOR_INTERVAL / 1000}秒`);
+function startDownloadMonitor(options = {}) {
+  _logger = options.logger || null;
+
+  log('info', '🔍 启动下载监控服务...');
+  log('info', `⏱️ 检查间隔: ${MONITOR_INTERVAL / 1000}秒`);
+  if (BOT_WEBHOOK_URL) log('info', `📡 Bot Webhook 已配置: ${BOT_WEBHOOK_URL}`);
 
   // 立即执行一次检查
   checkCompletedTorrents();
@@ -33,33 +47,45 @@ function startDownloadMonitor() {
   setInterval(checkCompletedTorrents, MONITOR_INTERVAL);
 }
 
+function isTorrentCompleted(t) {
+  return ['uploading', 'stalledUP', 'pausedUP'].includes(t.state);
+}
+
 /**
  * 检查已完成的下载
  */
 async function checkCompletedTorrents() {
+  if (_isChecking) return;
+  _isChecking = true;
+
   try {
+    if (pendingMoves.size === 0) return;
+
     const torrents = await getTorrents();
+    const now = Date.now();
 
-    // 筛选已完成的种子（状态为 uploading 或 stalledUP 表示已完成下载）
-    const completedTorrents = torrents.filter(t => {
-      return (
-        (t.state === 'uploading' || t.state === 'stalledUP') &&
-        !movingTasks.has(t.hash) && // 不在移动中
-        !pendingMoves.has(t.hash)   // 不在待移动队列
-      );
-    });
+    for (const [hash, task] of pendingMoves.entries()) {
+      if (movingTasks.has(hash)) continue;
 
-    if (completedTorrents.length > 0) {
-      console.log(`✅ 发现 ${completedTorrents.length} 个已完成的种子`);
-
-      for (const torrent of completedTorrents) {
-        // 这里应该从数据库查询是否需要自动移动
-        // 暂时跳过，等待完整的任务管理系统
-        console.log(`   - ${torrent.name} (${torrent.hash})`);
+      // 清理超时的待移动任务，避免永久堆积
+      if (now - task.addedAt > MOVE_TASK_TTL) {
+        pendingMoves.delete(hash);
+        log('warn', '⌛ 待移动任务已过期，已移除', { hash });
+        continue;
       }
+
+      const torrent = torrents.find(t => t.hash === hash);
+      if (!torrent) continue;
+
+      if (!isTorrentCompleted(torrent)) continue;
+
+      // 触发移动（processAutoMove 会负责标记 movingTasks、移除 pendingMoves）
+      await processAutoMove(torrent);
     }
   } catch (error) {
-    console.error('检查已完成下载失败:', error);
+    log('error', '检查已完成下载失败', { err: { message: error.message, stack: error.stack } });
+  } finally {
+    _isChecking = false;
   }
 }
 
@@ -71,7 +97,7 @@ function addPendingMove(hash, moveConfig) {
     moveConfig,
     addedAt: Date.now()
   });
-  console.log(`📦 添加到待移动队列: ${hash}`);
+  log('info', '📦 添加到待移动队列', { hash, moveConfig });
 }
 
 /**
@@ -81,7 +107,7 @@ async function processAutoMove(torrent) {
   const moveTask = pendingMoves.get(torrent.hash);
 
   if (!moveTask) {
-    console.log(`⏭️ 跳过无移动配置的种子: ${torrent.name}`);
+    log('info', '⏭️ 跳过无移动配置的种子', { name: torrent.name, hash: torrent.hash });
     return;
   }
 
@@ -90,7 +116,7 @@ async function processAutoMove(torrent) {
   pendingMoves.delete(torrent.hash);
 
   try {
-    console.log(`🚀 开始移动: ${torrent.name}`);
+    log('info', '🚀 开始移动', { name: torrent.name, hash: torrent.hash });
 
     // 1. 获取种子文件列表
     const files = await getTorrentFiles(torrent.hash);
@@ -114,11 +140,11 @@ async function processAutoMove(torrent) {
       }
     );
 
-    console.log(`✅ 移动成功: ${torrent.name} -> ${moveConfig.remote}${moveConfig.dest}`);
+    log('info', '✅ 移动成功', { name: torrent.name, dest: `${moveConfig.remote}${moveConfig.dest}` });
 
     // 4. 删除 qBittorrent 任务
     await deleteTorrent(torrent.hash, true);
-    console.log(`🗑️ 已删除种子任务: ${torrent.hash}`);
+    log('info', '🗑️ 已删除种子任务', { hash: torrent.hash });
 
     // 5. 通知 Bot
     await notifyBot({
@@ -130,7 +156,7 @@ async function processAutoMove(torrent) {
     });
 
   } catch (error) {
-    console.error(`❌ 自动移动失败: ${torrent.name}`, error);
+    log('error', '❌ 自动移动失败', { name: torrent.name, hash: torrent.hash, err: { message: error.message, stack: error.stack } });
 
     // 通知 Bot 错误
     await notifyBot({
@@ -151,20 +177,23 @@ async function processAutoMove(torrent) {
  */
 async function notifyBot(data) {
   if (!BOT_WEBHOOK_URL) {
-    console.warn('⚠️ Bot Webhook URL 未配置，跳过通知');
+    log('warn', '⚠️ Bot Webhook URL 未配置，跳过通知');
     return;
   }
 
   try {
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    if (BOT_WEBHOOK_API_KEY) headers['X-API-Key'] = BOT_WEBHOOK_API_KEY;
+
     await axios.post(BOT_WEBHOOK_URL, data, {
       timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers
     });
-    console.log('📤 已通知 Bot');
+    log('info', '📤 已通知 Bot');
   } catch (error) {
-    console.error('通知 Bot 失败:', error.message);
+    log('warn', '通知 Bot 失败', { err: { message: error.message } });
   }
 }
 
@@ -173,7 +202,7 @@ async function notifyBot(data) {
  */
 function setBotWebhook(url) {
   BOT_WEBHOOK_URL = url;
-  console.log(`📡 Bot Webhook 已设置: ${url}`);
+  log('info', '📡 Bot Webhook 已设置', { url });
 }
 
 /**
