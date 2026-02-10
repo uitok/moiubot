@@ -1,0 +1,29 @@
+[Unit]
+Description=MoiuBot Config Server
+After=network.target
+
+# Config server is only needed on the "master" host. If you don't deploy it,
+# omit .env.config-server and systemd will skip starting this unit.
+ConditionPathExists=/home/admin/github/moiubot/.env.config-server
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/github/moiubot
+
+Environment=NODE_ENV=production
+# Keep rclone config in the project runtime dir so User=admin can read/write it.
+Environment=RCLONE_CONFIG=/home/admin/github/moiubot/runtime/rclone/rclone.conf
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/usr/bin/node config-server/index.js
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+StandardOutput=append:/tmp/moiubot-config-server.log
+StandardError=append:/tmp/moiubot-config-server.log
+
+[Install]
+WantedBy=multi-user.target

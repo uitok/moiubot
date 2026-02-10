@@ -1,0 +1,24 @@
+[Unit]
+Description=MoiuBot Telegram Bot
+After=network.target
+ConditionPathExists=/home/admin/github/moiubot/.env.bot
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/github/moiubot
+
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/usr/bin/node bot/index.js
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+StandardOutput=append:/tmp/moiubot-bot.log
+StandardError=append:/tmp/moiubot-bot.log
+
+[Install]
+WantedBy=multi-user.target

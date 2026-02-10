@@ -1,0 +1,37 @@
+services:
+  bot-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    image: moiubot-bot:test
+    env_file:
+      - .env.bot
+    environment:
+      DATABASE_PATH: /app/database/test.db
+      NODE_ENV: production
+    volumes:
+      - ./test-db:/app/database
+      - ./test-logs:/app/logs
+    ports:
+      - "3444:3334"
+
+  agent-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: moiubot-agent:test
+    depends_on:
+      - bot-test
+    env_file:
+      - .env.agent
+    environment:
+      NODE_ENV: production
+      QBT_URL: http://host.docker.internal:18080
+      BOT_WEBHOOK_URL: http://bot-test:3334/api/webhook/agent
+    volumes:
+      - ./test-logs:/app/logs
+      - ${HOME}/.config/rclone:/home/node/.config/rclone:ro
+    ports:
+      - "3443:3333"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

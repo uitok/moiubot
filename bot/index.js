@@ -168,7 +168,15 @@ logger.info('🤖 MoiuBot 正在启动...');
 let webhook = null;
 
 // 启动轮询
-bot.launch()
+// Telegraf's launch() can hang indefinitely when network/DNS is unhealthy. Guard it with a timeout
+// so systemd can restart the process instead of leaving it stuck.
+const launchTimeoutMs = Number.parseInt(process.env.BOT_LAUNCH_TIMEOUT_MS || '120000', 10);
+const launchPromise = bot.launch({ dropPendingUpdates: true });
+const timeoutPromise = Number.isFinite(launchTimeoutMs) && launchTimeoutMs > 0
+  ? new Promise((_, reject) => setTimeout(() => reject(new Error(`Bot launch timeout after ${launchTimeoutMs}ms`)), launchTimeoutMs))
+  : null;
+
+(timeoutPromise ? Promise.race([launchPromise, timeoutPromise]) : launchPromise)
   .then(() => {
     logger.info('✅ MoiuBot 启动成功!');
     logger.info(`📝 允许的用户: ${ALLOWED_USERS.join(', ') || 'ALL'}`);
@@ -178,6 +186,11 @@ bot.launch()
   })
   .catch((error) => {
     logger.error('❌ Bot 启动失败', { err: { message: error.message, stack: error.stack } });
+    try {
+      bot.stop('launch_failed');
+    } catch (_) {
+      // ignore
+    }
     process.exit(1);
   });
 
@@ -200,6 +213,6 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 // 定期更新用户最后活跃时间
 setInterval(() => {
   // 这里可以添加定期清理过期会话等逻辑
-}, 300000); // 每5分钟
+}, 1200000); // 每5分钟
 
 module.exports = bot;

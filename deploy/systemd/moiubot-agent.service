@@ -1,0 +1,27 @@
+[Unit]
+Description=MoiuBot Agent
+After=network.target moiubot-config.service
+Wants=moiubot-config.service
+ConditionPathExists=/home/admin/github/moiubot/.env.agent
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/github/moiubot
+
+Environment=NODE_ENV=production
+# Keep rclone config in the project runtime dir so User=admin can backup/update it without EACCES.
+Environment=RCLONE_CONFIG=/home/admin/github/moiubot/runtime/rclone/rclone.conf
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ExecStart=/usr/bin/node agent/index.js
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+StandardOutput=append:/tmp/moiubot-agent.log
+StandardError=append:/tmp/moiubot-agent.log
+
+[Install]
+WantedBy=multi-user.target

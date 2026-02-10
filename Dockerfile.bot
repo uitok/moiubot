@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-slim AS deps
+WORKDIR /app
+
+# Build tools are needed for native deps (e.g. better-sqlite3). Keep them out of runtime image.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund \
+  && npm cache clean --force
+
+FROM node:22-slim AS runtime
+WORKDIR /app
+
+# Runtime system deps required by DOCKER_PLAN.md
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends rclone ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production
+
+# Pre-create bind-mount targets and ensure non-root can write.
+RUN mkdir -p /app/database /app/logs /app/config \
+  && chown -R node:node /app
+
+COPY --chown=node:node --from=deps /app/node_modules /app/node_modules
+COPY package.json package-lock.json ./
+COPY --chown=node:node bot ./bot
+COPY --chown=node:node shared ./shared
+
+USER node
+
+CMD ["node", "bot/index.js"]

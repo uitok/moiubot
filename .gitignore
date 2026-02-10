@@ -1,15 +1,16 @@
 # Dependencies
 node_modules/
 
-# Environment files
+# Environment files (never commit real secrets)
 .env
-.env.bot
-.env.agent
+.env.*
+!.env.example
+!.env.*.example
 
-# Database
-database/*.db
-database/*.db-shm
-database/*.db-wal
+# Database (SQLite)
+database/*.db*
+database/*.sqlite*
+database/*.sqlite3*
 
 # Logs
 logs/
@@ -32,3 +33,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Runtime state (secrets, generated configs, transient files)
+runtime/

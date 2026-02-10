@@ -1,0 +1,51 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    image: moiubot-bot:dev
+    restart: unless-stopped
+    env_file:
+      - .env.bot
+    environment:
+      # Force container-friendly paths (do not use host absolute paths from env files).
+      DATABASE_PATH: /app/database/qbt-bot.db
+      NODE_ENV: production
+    volumes:
+      - ./database:/app/database
+      - ./logs:/app/logs
+      - ./config:/app/config
+    ports:
+      # Agent -> Bot webhook server (enabled when BOT_WEBHOOK_PORT is set).
+      - "3334:3334"
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: moiubot-agent:dev
+    restart: unless-stopped
+    depends_on:
+      - bot
+    env_file:
+      - .env.agent
+    environment:
+      NODE_ENV: production
+      # Make qBittorrent reachable when it's running on the Docker host.
+      QBT_URL: http://host.docker.internal:18080
+      # Use container home dir for rclone config; mount it below.
+      RCLONE_CONFIG: /home/node/.config/rclone/rclone.conf
+      # Point webhook to the bot service within the compose network.
+      BOT_WEBHOOK_URL: http://bot:3334/api/webhook/agent
+      # Default to local rclone config (no central config-server) for dev.
+      RCLONE_SYNC_ENABLED: "false"
+      RCLONE_SYNC_ON_START: "false"
+    volumes:
+      - ./logs:/app/logs
+      # Mount host rclone config dir (read-only by default).
+      - ${HOME}/.config/rclone:/home/node/.config/rclone:ro
+    ports:
+      - "3333:3333"
+    extra_hosts:
+      # Needed on Linux so host.docker.internal resolves to the Docker host.
+      - "host.docker.internal:host-gateway"

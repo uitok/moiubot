@@ -160,11 +160,15 @@ async function handleAddCallback(ctx, callbackData) {
       const server = session.servers?.find(s => s.id === serverId);
 
       if (!server) {
-        return await ctx.answerCbQuery('服务器不存在');
+        await answerOnce('服务器不存在');
+        return;
       }
 
       session.server = server;
       session.state = SESSION_STATES.ADD_WAIT_TORRENT;
+
+      // Answer early to avoid Telegram's callback timeout window (spinner).
+      await answerOnce('服务器已选择');
 
       await respond(ctx,
         `✅ 已选择服务器: ${server.name}\n\n` +
@@ -175,8 +179,6 @@ async function handleAddCallback(ctx, callbackData) {
         ,
         { reply_markup: null }
       );
-
-      await answerOnce('服务器已选择');
       return;
     }
 
@@ -304,6 +306,10 @@ async function handleAddCallback(ctx, callbackData) {
   } finally {
     if (acquiredBusy) session.__busy = false;
   }
+
+  // Fallback: always answer callback queries, even for unknown add_* data,
+  // otherwise Telegram shows "Bot didn't respond".
+  await answerOnce('未知操作');
 }
 
 /**
